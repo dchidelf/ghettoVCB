@@ -21,7 +21,7 @@ cron_check()
 		IFS=,      # Support values like 3,5
 		for IVAL in $CRON_VAL
 		do
-			echo "TEST: $i $IVAL - $TEST_VAL"
+			# echo "TEST: $i $IVAL - $TEST_VAL"
 			IFS=$oIFS  # Restore IFS
 
 			# Test if value is a multiple like */5
@@ -43,73 +43,11 @@ cron_check()
 		break
 	done
 
-#	IFS=$oIFS  # Restore IFS
 	return $RC
-}
-
-
-test_cron_value()
-{
-    INPUT_VAL=$1
-    TEST_VAL=$2
-
-    if [ "$INPUT_VAL" == "*" ]
-    then
-       return 0
-    fi
-
-    oIFS=$IFS
-    IFS=,
-    for IVAL in $INPUT_VAL
-    do
-       IFS=$oIFS
-
-       # Test if value is a multiple like */5
-       MULT=`echo "$IVAL" | awk -F\/ '{print $2}'`
-       if [ ! -z "$MULT" ]
-       then
-          if [ "$MULT" -ne 0 ]
-          then
-             # If the test value is a multiple 
-             ISMULT=`expr $TEST_VAL % $MULT` 
-             if [ "$ISMULT" -eq 0 ] 
-             then
-                return 0
-             fi
-          fi
-       elif [ "$IVAL" -eq "$TEST_VAL" ]
-       then
-          return 0
-       fi
-    done 
-
-    return 1
-}
-
-test_cron_string() 
-{
-    INPUT_STR=$1
-    TEST_DATE=$2
-
-    # Try to reduce checks by testing most common non-* first
-    # Test : hour dow day month
-    for i in 1 4 2 3 
-    do
-       INPUT_VAL=`echo "$INPUT_STR" | awk "{print \\$$i}"`
-       TEST_VAL=`echo "$TEST_DATE" | awk "{print \\$$i}"`
-       test_cron_value "$INPUT_VAL" "$TEST_VAL" 
-       if [ "$?" -ne 0 ] 
-       then 
-          return $i
-       fi
-    done 
-
-    return 0
 }
 
 test_it() 
 {
-   #test_cron_string "$1" "$2" 
    cron_check "$1" "$2" 
    if [ $? -eq 0 ]
    then
