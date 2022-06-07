@@ -250,7 +250,7 @@ cron_check() {
 	TEST_DATE=$2
 
 	# If the CRON string is empty, don't filter VM
-	if [ -z "$CHECK_STR" ] ; then return 0; fi
+	if [[ -z "$CHECK_STR" ]] ; then return 0; fi
 
 	oIFS=$IFS  # Save the current IFS
 	RC=0       # Initialize to 0 = Cron matches
@@ -261,7 +261,7 @@ cron_check() {
 	do
 		CRON_VAL=`echo "$CHECK_STR" | awk "{print \\$$i}"`
 
-		if [ "$CRON_VAL" == "*" ] ; then continue; fi
+		if [[ "$CRON_VAL" == "*" ]] ; then continue; fi
 
 		TEST_VAL=`echo "$TEST_DATE" | awk "{print \\$$i}"`
 
@@ -273,23 +273,21 @@ cron_check() {
 
 			# Test if value is a multiple like */5
 			MULT=`echo "$IVAL" | awk -F\/ '{print $2}'`
-
-			if [ ! -z "$MULT" ]
+			if [[ ! -z "$MULT" ]]
 			then
-				if [ "$MULT" -ne 0 ]
+				if [[ "$MULT" -ne 0 ]]
 				then
 					# If the test value is a multiple 
 					ISMULT=`expr $TEST_VAL % $MULT` 
 					if [ "$ISMULT" -eq 0 ] ; then continue 2; fi
 				fi
-			elif [ "$IVAL" -eq "$TEST_VAL" ] ; then continue 2; fi
+			elif [[ "$IVAL" -eq "$TEST_VAL" ]] ; then continue 2; fi
 		done 
 
 		# This part does not match, so return the index 
 		RC=$i
 		break
 	done
-
 	return $RC
 }
 
@@ -1046,7 +1044,12 @@ ghettoVCB() {
             storageInfo "before"
         fi
 
-	CRON_CHECK=$(cron_check "${CRON}" "${CRON_TEST_DATE}")
+	cron_check "${CRON}" "${CRON_TEST_DATE}"
+	CRON_CHECK_RC=$?
+
+        if [[ ! -z "${CRON}" ]] && [[ "$CRON_CHECK_RC" -eq 0 ]] ; then
+            logger "info" "Including backup of ${VM_NAME} based on cron [${CRON}]\n"
+        fi
 
         #ignore VM as it's in the exclusion list or was on problem list
         if [[ "${IGNORE_VM}" -eq 1 ]] ; then
@@ -1056,8 +1059,9 @@ ghettoVCB() {
             logger "info" "ERROR: failed to locate and extract VM_ID for ${VM_NAME}!\n"
             VM_FAILED=1
 
-        elif [[ "${CRON_CHECK}" -ne 0 ]] ; then 
+        elif [[ "${CRON_CHECK_RC}" -ne 0 ]] ; then 
             logger "debug" "Ignoring ${VM_NAME} for backup since it is not time for CRON(${CRON})\n"
+            VM_OK=1
 
         elif [[ "${LOG_LEVEL}" == "dryrun" ]] ; then
             logger "dryrun" "###############################################"
