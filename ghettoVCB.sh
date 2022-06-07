@@ -14,6 +14,9 @@ VERSION=1
 # directory that all VM backups should go (e.g. /vmfs/volumes/SAN_LUN1/mybackupdir)
 VM_BACKUP_VOLUME=/vmfs/volumes/mini-local-datastore-hdd/backups
 
+# Default cron setting (disabled)
+CRON=
+
 # Format output of VMDK backup
 # zeroedthick
 # 2gbsparse
@@ -160,6 +163,9 @@ NFS_BACKUP_DELAY=0
 
 ########################## DO NOT MODIFY PAST THIS LINE ##########################
 
+# Capture the current date/time for cron checks
+CRON_TEST_DATE="$(date +'%M %H %d %m %w')"
+
 # Do not remove workdir on exit: 1=yes, 0=no
 WORKDIR_DEBUG=0
 LOG_LEVEL="info"
@@ -236,6 +242,55 @@ logger() {
             echo -ne "${TIME} -- ${LOG_TYPE}: ${MSG}\r\n" >> "${EMAIL_LOG_OUTPUT}"
         fi
     fi
+}
+
+
+cron_check() {
+	CHECK_STR=$1
+	TEST_DATE=$2
+
+	# If the CRON string is empty, don't filter VM
+	if [ -z "$CHECK_STR" ] ; then return 0; fi
+
+	oIFS=$IFS  # Save the current IFS
+	RC=0       # Initialize to 0 = Cron matches
+
+	# Try to reduce checks by testing most common non-* first
+	# Test : minute hour dow day month
+	for i in 1 2 5 3 4
+	do
+		CRON_VAL=`echo "$CHECK_STR" | awk "{print \\$$i}"`
+
+		if [ "$CRON_VAL" == "*" ] ; then continue; fi
+
+		TEST_VAL=`echo "$TEST_DATE" | awk "{print \\$$i}"`
+
+		IFS=,      # Support values like 3,5
+		for IVAL in $CRON_VAL
+		do
+			# echo "TEST: $i $IVAL - $TEST_VAL"
+			IFS=$oIFS  # Restore IFS
+
+			# Test if value is a multiple like */5
+			MULT=`echo "$IVAL" | awk -F\/ '{print $2}'`
+
+			if [ ! -z "$MULT" ]
+			then
+				if [ "$MULT" -ne 0 ]
+				then
+					# If the test value is a multiple 
+					ISMULT=`expr $TEST_VAL % $MULT` 
+					if [ "$ISMULT" -eq 0 ] ; then continue 2; fi
+				fi
+			elif [ "$IVAL" -eq "$TEST_VAL" ] ; then continue 2; fi
+		done 
+
+		# This part does not match, so return the index 
+		RC=$i
+		break
+	done
+
+	return $RC
 }
 
 sanityCheck() {
@@ -386,6 +441,7 @@ captureDefaultConfigurations() {
     DEFAULT_NFS_IO_HACK_SLEEP_TIMER="${NFS_IO_HACK_SLEEP_TIMER}"
     DEFAULT_NFS_BACKUP_DELAY="${NFS_BACKUP_DELAY}"
     DEFAULT_ENABLE_NFS_IO_HACK="${ENABLE_NFS_IO_HACK}"
+    DEFAULT_CRON="${CRON}"
 }
 
 useDefaultConfigurations() {
@@ -413,6 +469,7 @@ useDefaultConfigurations() {
     NFS_IO_HACK_LOOP_MAX="${DEFAULT_NFS_IO_HACK_LOOP_MAX}"
     NFS_IO_HACK_SLEEP_TIMER="${DEFAULT_NFS_IO_HACK_SLEEP_TIMER}"
     NFS_BACKUP_DELAY="${DEFAULT_NFS_BACKUP_DELAY}"
+    CRON="${DEFAULT_CRON}"
 }
 
 reConfigureGhettoVCBConfiguration() {
@@ -567,6 +624,7 @@ dumpVMConfigurations() {
     logger "info" "CONFIG - VM_STARTUP_ORDER = ${VM_STARTUP_ORDER}"
     logger "info" "CONFIG - RSYNC_LINK = ${RSYNC_LINK}"
     logger "info" "CONFIG - BACKUP_FILES_CHMOD = ${BACKUP_FILES_CHMOD}"
+    logger "info" "CONFIG - CRON = ${CRON}"
     logger "info" "CONFIG - EMAIL_LOG = ${EMAIL_LOG}"
     if [[ "${EMAIL_LOG}" -eq 1 ]]; then
         logger "info" "CONFIG - EMAIL_SERVER = ${EMAIL_SERVER}"
@@ -988,6 +1046,8 @@ ghettoVCB() {
             storageInfo "before"
         fi
 
+	CRON_CHECK=$(cron_check "${CRON}" "${CRON_TEST_DATE}")
+
         #ignore VM as it's in the exclusion list or was on problem list
         if [[ "${IGNORE_VM}" -eq 1 ]] ; then
             logger "debug" "Ignoring ${VM_NAME} for backup since it is located in exclusion file or problem list\n"
@@ -995,6 +1055,9 @@ ghettoVCB() {
         elif [[ -z ${VM_ID} ]] ; then
             logger "info" "ERROR: failed to locate and extract VM_ID for ${VM_NAME}!\n"
             VM_FAILED=1
+
+        elif [[ "${CRON_CHECK}" -ne 0 ]] ; then 
+            logger "debug" "Ignoring ${VM_NAME} for backup since it is not time for CRON(${CRON})\n"
 
         elif [[ "${LOG_LEVEL}" == "dryrun" ]] ; then
             logger "dryrun" "###############################################"
