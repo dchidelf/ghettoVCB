@@ -238,7 +238,7 @@ logger() {
             echo -e "${TIME} -- ${LOG_TYPE}: ${MSG}" >> "${LOG_OUTPUT}"
         fi
 
-        if [[ "${EMAIL_LOG}" -eq 1 ]] ; then
+        if [[ "${EMAIL_LOG}" -eq 1 ]] && [[ "${LOG_TYPE}" == "info" ]] ; then
             echo -ne "${TIME} -- ${LOG_TYPE}: ${MSG}\r\n" >> "${EMAIL_LOG_OUTPUT}"
         fi
     fi
@@ -679,7 +679,9 @@ Get_Final_Status_Sendemail() {
     logger "debug" "Succesfully removed lock directory - ${WORKDIR}\n"
     logger "info" "============================== ghettoVCB LOG END ================================\n"
 
-    sendMail
+    if [[ "$EXIT" -ne 9 ]] ; then   # 9 means no backups due to CRON settings
+        sendMail
+    fi
 }
 
 indexedRotate() {
@@ -950,6 +952,7 @@ ghettoVCB() {
     VM_FAILED=0
     VMDK_FAILED=0
     PROBLEM_VMS=
+    CRON_SKIP=0
 
     dumpHostInfo
 
@@ -1031,6 +1034,24 @@ ghettoVCB() {
 
         if [[ "${USE_VM_CONF}" -eq 1 ]] && [[ ! -z ${VM_ID} ]]; then
             reConfigureBackupParam "${VM_NAME}"
+            # dumpVMConfigurations # Wait until after CRON check before dumping config
+        fi
+
+	CRON_CHECK_RC=0
+        if [[ ! -z "${CRON}" ]] ; then
+		cron_check "${CRON}" "${CRON_TEST_DATE}"
+		CRON_CHECK_RC=$?
+
+        	if [[ "$CRON_CHECK_RC" -eq 0 ]] ; then
+			logger "info" "Including backup of ${VM_NAME} based on cron [${CRON}]\n"
+		else
+			logger "debug" "Ignoring ${VM_NAME} for backup since it is not time for CRON(${CRON})"
+			CRON_SKIP=1
+			continue	
+	        fi
+	fi
+
+        if [[ "${USE_VM_CONF}" -eq 1 ]] && [[ ! -z ${VM_ID} ]]; then
             dumpVMConfigurations
         fi
 
@@ -1044,13 +1065,6 @@ ghettoVCB() {
             storageInfo "before"
         fi
 
-	cron_check "${CRON}" "${CRON_TEST_DATE}"
-	CRON_CHECK_RC=$?
-
-        if [[ ! -z "${CRON}" ]] && [[ "$CRON_CHECK_RC" -eq 0 ]] ; then
-            logger "info" "Including backup of ${VM_NAME} based on cron [${CRON}]\n"
-        fi
-
         #ignore VM as it's in the exclusion list or was on problem list
         if [[ "${IGNORE_VM}" -eq 1 ]] ; then
             logger "debug" "Ignoring ${VM_NAME} for backup since it is located in exclusion file or problem list\n"
@@ -1058,10 +1072,6 @@ ghettoVCB() {
         elif [[ -z ${VM_ID} ]] ; then
             logger "info" "ERROR: failed to locate and extract VM_ID for ${VM_NAME}!\n"
             VM_FAILED=1
-
-        elif [[ "${CRON_CHECK_RC}" -ne 0 ]] ; then 
-            logger "debug" "Ignoring ${VM_NAME} for backup since it is not time for CRON(${CRON})\n"
-            VM_OK=1
 
         elif [[ "${LOG_LEVEL}" == "dryrun" ]] ; then
             logger "dryrun" "###############################################"
@@ -1534,9 +1544,15 @@ getFinalStatus() {
         LOG_STATUS="ERROR"
         EXIT=6
     elif [[ $VM_OK == 0 ]] && [[ $VM_FAILED == 0 ]] && [[ $VMDK_FAILED == 0 ]]; then
-        FINAL_STATUS="###### Final status: ERROR: No VMs backed up! ######"
-        LOG_STATUS="ERROR"
-        EXIT=7
+        if [[ $CRON_SKIP -gt 0 ]] ; then
+            FINAL_STATUS="###### Final status: No VMs backed up! ######"
+            LOG_STATUS="OK"
+            EXIT=9
+        else
+            FINAL_STATUS="###### Final status: ERROR: No VMs backed up! ######"
+            LOG_STATUS="ERROR"
+            EXIT=7
+        fi
     elif [[ $VM_OK == 0 ]] && [[ $VM_FAILED == 0 ]] && [[ $VMDK_FAILED == 1 ]]; then
         FINAL_STATUS="###### Final status: ERROR: All VMs experienced at least a partial failure! ######"
         LOG_STATUS="ERROR"
