@@ -1595,7 +1595,7 @@ sendDelay() {
     while read L; do
     	[ $c -lt 4 ] && sleep ${EMAIL_DELAY_INTERVAL}
     	c=$((c+1))
-    	echo $L
+    	echo "$L"
     done
 }
 
