@@ -956,25 +956,31 @@ ghettoVCB() {
     PROBLEM_VMS=
     CRON_SKIP=0
 
-    if [[ -n "${VM_CHECK}" ]] && [[ "${VM_CHECK}" -eq 1 ]] ; then
-	    LOG_LEVEL = 'dryrun'   # disable actual changes
-    fi 
-
     dumpHostInfo
 
-    if [[ ${ENABLE_NON_PERSISTENT_NFS} -eq 1 ]] ; then
-        VM_BACKUP_VOLUME="/vmfs/volumes/${NFS_LOCAL_NAME}/${NFS_VM_BACKUP_DIR}"
-        if [[ "${LOG_LEVEL}" !=  "dryrun" ]] ; then
-            #1 = readonly
-            #0 = readwrite
-            logger "debug" "Mounting NFS: ${NFS_SERVER}:${NFS_MOUNT} to /vmfs/volume/${NFS_LOCAL_NAME}"
-	    if [[ ${ESX_RELEASE} == "5.5.0" ]] || [[ ${ESX_RELEASE} == "6.0.0" || ${ESX_RELEASE} == "6.5.0" || ${ESX_RELEASE} == "6.7.0" || ${ESX_RELEASE} == "7.0.0" || ${ESX_RELEASE} == "7.0.1" || ${ESX_RELEASE} == "7.0.2" || ${ESX_RELEASE} == "7.0.3" ]] ; then
-                ${VMWARE_CMD} hostsvc/datastore/nas_create "${NFS_LOCAL_NAME}" "${NFS_VERSION}" "${NFS_MOUNT}" 0 "${NFS_SERVER}"
-            else
-                ${VMWARE_CMD} hostsvc/datastore/nas_create "${NFS_LOCAL_NAME}" "${NFS_SERVER}" "${NFS_MOUNT}" 0
-            fi
-	fi
-    fi
+    if [[ -n "${VM_CHECK}" ]] && [[ "${VM_CHECK}" -eq 1 ]] ; then
+
+            # Just checking to see what we should backup, not running 
+
+	    LOG_LEVEL = 'dryrun'   # disable actual changes
+
+    else
+
+       if [[ ${ENABLE_NON_PERSISTENT_NFS} -eq 1 ]] ; then
+           VM_BACKUP_VOLUME="/vmfs/volumes/${NFS_LOCAL_NAME}/${NFS_VM_BACKUP_DIR}"
+           if [[ "${LOG_LEVEL}" !=  "dryrun" ]] ; then
+               #1 = readonly
+               #0 = readwrite
+               logger "debug" "Mounting NFS: ${NFS_SERVER}:${NFS_MOUNT} to /vmfs/volume/${NFS_LOCAL_NAME}"
+	       if [[ ${ESX_RELEASE} == "5.5.0" ]] || [[ ${ESX_RELEASE} == "6.0.0" || ${ESX_RELEASE} == "6.5.0" || ${ESX_RELEASE} == "6.7.0" || ${ESX_RELEASE} == "7.0.0" || ${ESX_RELEASE} == "7.0.1" || ${ESX_RELEASE} == "7.0.2" || ${ESX_RELEASE} == "7.0.3" ]] ; then
+                   ${VMWARE_CMD} hostsvc/datastore/nas_create "${NFS_LOCAL_NAME}" "${NFS_VERSION}" "${NFS_MOUNT}" 0 "${NFS_SERVER}"
+               else
+                   ${VMWARE_CMD} hostsvc/datastore/nas_create "${NFS_LOCAL_NAME}" "${NFS_SERVER}" "${NFS_MOUNT}" 0
+               fi
+   	   fi
+       fi
+
+    fi 
 
     captureDefaultConfigurations
 
@@ -1723,7 +1729,7 @@ if [[ "${EMAIL_FROM%%@*}" == "" ]] ; then
 fi
 
 #read user input
-while getopts ":af:c:g:w:m:l:d:e:j:" ARGS; do
+while getopts ":af:c:g:w:m:l:d:e:j:r:" ARGS; do
     case $ARGS in
         w)
             WORKDIR="${OPTARG}"
@@ -1831,7 +1837,15 @@ else
 
     if [[ -n "${VM_MISSED}" ]] && [[ $BACKUP_ALL_VMS -eq 1 ]] ; then
        logger "info" "Checking cron settings for all VMs for delayed scheduling\n"
-       ghettoVCB "${VM_FILE}" "${VM_MISSED}" 1
+
+       WORKDIR="$WORKDIR-check-$$"
+       if mkdir "${WORKDIR}"; then
+          trap 'rm -rf "${WORKDIR}"' 0
+          VM_FILE="${WORKDIR}/vm-file"
+
+          sanityCheck
+          ghettoVCB "${VM_FILE}" "${VM_MISSED}" 1
+       fi
     fi
 
 	Get_Final_Status_Sendemail
