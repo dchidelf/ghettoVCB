@@ -948,11 +948,17 @@ powerOn() {
 
 ghettoVCB() {
     VM_INPUT=$1
+    VM_MISSED=$2
+    VM_CHECK=$3
     VM_OK=0
     VM_FAILED=0
     VMDK_FAILED=0
     PROBLEM_VMS=
     CRON_SKIP=0
+
+    if [[ -n "${VM_CHECK}" ]] && [[ "${VM_CHECK}" -eq 1 ]] ; then
+	    LOG_LEVEL = 'dryrun'   # disable actual changes
+    fi 
 
     dumpHostInfo
 
@@ -1037,6 +1043,16 @@ ghettoVCB() {
             # dumpVMConfigurations # Wait until after CRON check before dumping config
         fi
 
+        if [[ -n "${VM_CHECK}" ]] && [[ "${VM_CHECK}" -eq 0 ]] ; then
+		if [[ -n "${VM_MISSED}" ]] && [[ -e "${VM_MISSED}" ]] ; then
+                    grep -E "^${VM_NAME}\$" "${VM_MISSED}" > /dev/null 2>&1
+		    if [[ $? -eq 0 ]] ; then
+			logger "info" "Including backup of ${VM_NAME} based on previous reschedule\n"
+                        CRON=""  # Skip cron check
+		    fi
+		fi
+	fi
+
 	CRON_CHECK_RC=0
         if [[ ! -z "${CRON}" ]] ; then
 		cron_check "${CRON}" "${CRON_TEST_DATE}"
@@ -1050,6 +1066,17 @@ ghettoVCB() {
 			continue	
 	        fi
 	fi
+
+        if [[ -n "${VM_CHECK}" ]] && [[ "${VM_CHECK}" -eq 1 ]] ; then
+		# We are only here checking if a VM should be backed up.  It is so add it to VM_MISSED
+		if [[ -n "${VM_MISSED}" ]] ; then
+	  	   logger "info" "Delaying ${VM_NAME} for next run because backups are already running CRON(${CRON})"
+	  	   echo "${VM_NAME}" >> "${VM_MISSED}"
+	        fi
+		CRON_SKIP=1
+		continue	
+	fi
+
 
         if [[ "${USE_VM_CONF}" -eq 1 ]] && [[ ! -z ${VM_ID} ]]; then
             dumpVMConfigurations
@@ -1705,6 +1732,9 @@ while getopts ":af:c:g:w:m:l:d:e:j:" ARGS; do
             BACKUP_ALL_VMS=1
             VM_FILE='${WORKDIR}/vm-input-list'
             ;;
+	r) 
+            VM_MISSED="${OPTARG}" 
+            ;;
         f)
             VM_FILE="${OPTARG}"
             ;;
@@ -1782,7 +1812,14 @@ if mkdir "${WORKDIR}"; then
     # terminate script and remove workdir when a signal is received
     trap 'rm -rf "${WORKDIR}" ; exit 2' 1 2 3 13 15
 
-    ghettoVCB ${VM_FILE}
+    if [[ -n "${VM_MISSED}" ]] && [[ -e "${VM_MISSED}" ]] ; then
+        mv "${VM_MISSED}" "${WORKDIR}/VM_MISSED"
+        sort -u "${WORKDIR}/VM_MISSED" >"${WORKDIR}/VM_MISSED.uniq"
+
+        ghettoVCB "${VM_FILE}" "${WORKDIR}/VM_MISSED.uniq" 0
+    else 
+        ghettoVCB "${VM_FILE}"
+    fi
 
     Get_Final_Status_Sendemail
 
@@ -1791,6 +1828,12 @@ if mkdir "${WORKDIR}"; then
     exit $EXIT
 else
     logger "info" "Failed to acquire lock, another instance of script may be running, giving up on ${WORKDIR}\n"
+
+    if [[ -n "${VM_MISSED}" ]] && [[ $BACKUP_ALL_VMS -eq 1 ]] ; then
+       logger "info" "Checking cron settings for all VMs for delayed scheduling\n"
+       ghettoVCB "${VM_FILE}" "${VM_MISSED}" 1
+    fi
+
 	Get_Final_Status_Sendemail
     exit 1
 fi
